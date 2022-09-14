@@ -13,9 +13,10 @@ object Settings {
     lazy val timeMultiplier = webLogGen.getInt("time_multiplier")
     lazy val pages = webLogGen.getInt("pages")
     lazy val visitors = webLogGen.getInt("visitors")
+    lazy val filePath = webLogGen.getString("file_path")
   }
 
-  
+
 
 
 }
