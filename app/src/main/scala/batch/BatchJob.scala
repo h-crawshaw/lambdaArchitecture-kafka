@@ -1,8 +1,7 @@
 package batch
-
-import domain._
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.functions.from_unixtime
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.{SQLContext, SparkSession}
 
 object BatchJob {
   def main (args: Array[String]): Unit = {
@@ -11,36 +10,6 @@ object BatchJob {
       .appName("Lambda with Spark")
       .master("local[*]")
       .getOrCreate()
-
-
-//    val sourceFile = "C://Users/harry.crawshaw/Desktop/kafkaconnect/data.tsv"
-//
-//    val input = spark.sparkContext.textFile(sourceFile)
-//    input.foreach(println)
-//
-//    val inputRDD = input.flatMap { line =>
-//      val record = line.split("\\t")
-//      val MS_IN_HOUR = 1000 * 60 * 60
-//      if (record.length == 7)
-//      Some(Activity(record(0).toLong / MS_IN_HOUR * MS_IN_HOUR,
-//        record(1),
-//        record(2),
-//        record(3),
-//        record(4),
-//        record(5),
-//        record(6)
-//      ))
-//      else
-//        None
-//    }
-//    inputRDD.foreach(println)
-
-
-
-
-
-
-
 
 
     val inputSchema = StructType(Array(
@@ -54,32 +23,74 @@ object BatchJob {
     ))
 
     import spark.implicits._
-    val MS_IN_HOUR: Long = 1000 * 60 * 60
     val inputDF = spark
       .read
       .option("delimiter", "\\t")
       .schema(inputSchema)
       .csv("C://Users/harry.crawshaw/Desktop/kafkaconnect/data.tsv")
-      .withColumn("timestamp_hour", ($"timestamp"/3600).cast(LongType) * 100000)
-    //    inputDF.foreach(println)
-    inputDF.show()
-    inputDF.printSchema()
-
-//    val DF = inputDF.select(
-//      add_months($"timestamp_hour", 1),
-//      $"*"
-//    )
-//    DF.show()
+      .withColumn("timestamp_hour", from_unixtime($"timestamp"/1000))
 
 
-    //implicit val sqlContext = spark.sqlContext
+    implicit val sqlContext: SQLContext = spark.sqlContext
     import org.apache.spark.sql.functions._
+    import sqlContext.implicits._
+
+    sqlContext.udf.register("UnderExposed",
+      (pageViewCount: Long, purchaseCount: Long) =>
+      if (purchaseCount == 0) 0 else pageViewCount/purchaseCount
+    )
+
+    val DF = inputDF.select(
+      add_months(col("timestamp_hour").cast(TimestampType), 1).as("timestamp_hour"),
+      col("timestamp"),
+      col("referrer"),
+      col("action"),
+      col("prevPage"),
+      col("visitor"),
+      col("page"),
+      col("product"))
+      .cache()
+
+    DF.createOrReplaceTempView("DF")
+    val visitorsByProduct = sqlContext.sql(
+      """
+        |SELECT product, timestamp_hour, COUNT(DISTINCT visitor) AS unique_visitors
+        |FROM DF
+        |GROUP BY product, timestamp_hour
+        |""".stripMargin)
+
+    val activityByProduct = sqlContext.sql(
+      """
+        |SELECT
+        |product,
+        |timestamp_hour,
+        |SUM(CASE WHEN action = 'purchase' THEN 1 ELSE 0 END) AS purchase_count,
+        |SUM(CASE WHEN action = 'add_to_cart' THEN 1 ELSE 0 END) AS add_to_cart_count,
+        |SUM(CASE WHEN action = 'page_view' THEN 1 ELSE 0 END) AS page_view_count
+        |FROM DF
+        |GROUP BY product, timestamp_hour
+        |""".stripMargin)
+
+    activityByProduct.createOrReplaceTempView("activityByProduct")
+
+    val underExposedProducts = sqlContext.sql(
+      """
+        |SELECT
+        |product,
+        |timestamp_hour,
+        |UnderExposed(page_view_count, purchase_count) AS negative_exposure
+        |FROM activityByProduct
+        |ORDER BY negative_exposure DESC
+        |LIMIT 5
+        |""".stripMargin)
+
+    visitorsByProduct.show()
+    activityByProduct.show()
+    underExposedProducts.show()
 
 
-//    val DF = inputDF.select(
-//      add_months($"timestamp_hour", 1).as("timestamp_hour")
-//    )
-//    DF.show()
+
+
 
   }
 
