@@ -27,7 +27,7 @@ object BatchJob {
       .read
       .option("delimiter", "\\t")
       .schema(inputSchema)
-      .csv("C://Users/harry.crawshaw/Desktop/kafkaconnect/data.tsv")
+      .csv("C://Users/harry.crawshaw/Desktop/kafkaconnect/data.tsv") // FROM s3
       .withColumn("timestamp_hour", from_unixtime($"timestamp"/1000))
 
 
@@ -35,10 +35,10 @@ object BatchJob {
     import org.apache.spark.sql.functions._
     import sqlContext.implicits._
 
-    sqlContext.udf.register("UnderExposed",
-      (pageViewCount: Long, purchaseCount: Long) =>
-      if (purchaseCount == 0) 0 else pageViewCount/purchaseCount
-    )
+//    sqlContext.udf.register("UnderExposed",
+//      (pageViewCount: Long, purchaseCount: Long) =>
+//      if (purchaseCount == 0) 0 else pageViewCount/purchaseCount
+//    )
 
     val DF = inputDF.select(
       add_months(col("timestamp_hour").cast(TimestampType), 1).as("timestamp_hour"),
@@ -69,24 +69,29 @@ object BatchJob {
         |SUM(CASE WHEN action = 'page_view' THEN 1 ELSE 0 END) AS page_view_count
         |FROM DF
         |GROUP BY product, timestamp_hour
-        |""".stripMargin)
+        |""".stripMargin).cache()
 
-    activityByProduct.createOrReplaceTempView("activityByProduct")
-
-    val underExposedProducts = sqlContext.sql(
-      """
-        |SELECT
-        |product,
-        |timestamp_hour,
-        |UnderExposed(page_view_count, purchase_count) AS negative_exposure
-        |FROM activityByProduct
-        |ORDER BY negative_exposure DESC
-        |LIMIT 5
-        |""".stripMargin)
-
-    visitorsByProduct.show()
     activityByProduct.show()
-    underExposedProducts.show()
+//    activityByProduct.write
+//      .partitionBy("timestamp_hour")
+//      .mode(SaveMode.Append)
+//      .parquet("..../batch1") // TO HDFS "hdfs://lambda-app/batch1" maybe
+//
+//    activityByProduct.createOrReplaceTempView("activityByProduct")
+
+//    val underExposedProducts = sqlContext.sql(
+//      """
+//        |SELECT
+//        |product,
+//        |timestamp_hour,
+//        |UnderExposed(page_view_count, purchase_count) AS negative_exposure
+//        |FROM activityByProduct
+//        |ORDER BY negative_exposure DESC
+//        |LIMIT 5
+//        |""".stripMargin)
+
+    
+
 
 
 
