@@ -26,13 +26,14 @@ object StreamingJob {
     val testDF = spark.readStream
       .option("delimiter", "\\t")
       .schema(inputtestSchema)
-      .csv("C://Users/harry.crawshaw/Desktop/kafkaconnect/data.tsv")
+      .csv("C://Users/harry.crawshaw/Desktop/kafkaconnect/input")
 
     testDF.writeStream
-      .format("csv")
-      .option("path", "C://Users/harry.crawshaw/Desktop/kafkaconnect/")
+      .format("parquet")
+      .option("path", "C://Users/harry.crawshaw/Desktop/kafkaconnect/output")
+      .option("checkpointLocation", "C://Users/harry.crawshaw/Desktop/kafkaconnect/checkpoints")
       .start()
-
+      .awaitTermination()
   }
 
 }
