@@ -9,8 +9,10 @@ lazy val root = (project in file("."))
 
 val sparkVersion = "3.2.0"
 val configVersion = "1.4.2"
+val awscalaVersion = "0.9.+"
 libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-core" % sparkVersion,
-  "org.apache.spark" %% "spark-sql" % sparkVersion)
+  "org.apache.spark" %% "spark-sql" % sparkVersion,
+  "com.github.seratch" %% "awscala-s3" % awscalaVersion)
 
 libraryDependencies += "com.typesafe" % "config" % configVersion
