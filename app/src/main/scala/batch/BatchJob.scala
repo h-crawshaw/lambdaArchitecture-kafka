@@ -1,102 +1,50 @@
 package batch
-import org.apache.spark.sql.functions.from_unixtime
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.{SQLContext, SparkSession}
 
+import config.Settings
+import org.apache.spark.sql.SaveMode
+import domain._
+import utils.SparkUtils._
+
+/**
+ * Created by Ahmad Alkilani on 5/1/2016.
+ */
 object BatchJob {
   def main (args: Array[String]): Unit = {
 
-    val spark = SparkSession.builder()
-      .appName("Lambda with Spark")
-      .master("local[*]")
-      .getOrCreate()
+    // setup spark context
+    val sc = getSparkContext("Lambda with Spark")
+    val sqlContext = getSQLContext(sc)
+    val wlc = Settings.WebLogGen
 
+    // initialize input RDD
+    val inputDF = sqlContext.read.parquet(wlc.hdfsPath)
+      .where("unix_timestamp() - timestamp_hour / 1000 <= 60 * 60 * 6")
 
-    val inputSchema = StructType(Array(
-      StructField("timestamp", LongType),
-      StructField("referrer", StringType),
-      StructField("action", StringType),
-      StructField("prevPage", StringType),
-      StructField("visitor", StringType),
-      StructField("page", StringType),
-      StructField("product", StringType)
-    ))
-
-    import spark.implicits._
-    val inputDF = spark
-      .read
-      .option("delimiter", "\\t")
-      .schema(inputSchema)
-      .csv("C://Users/harry.crawshaw/Desktop/kafkaconnect/data.tsv") // FROM s3
-      .withColumn("timestamp_hour", from_unixtime($"timestamp"/1000))
-
-
-    implicit val sqlContext: SQLContext = spark.sqlContext
-    import org.apache.spark.sql.functions._
-    import sqlContext.implicits._
-
-//    sqlContext.udf.register("UnderExposed",
-//      (pageViewCount: Long, purchaseCount: Long) =>
-//      if (purchaseCount == 0) 0 else pageViewCount/purchaseCount
-//    )
-
-    val DF = inputDF.select(
-      add_months(col("timestamp_hour").cast(TimestampType), 1).as("timestamp_hour"),
-      col("timestamp"),
-      col("referrer"),
-      col("action"),
-      col("prevPage"),
-      col("visitor"),
-      col("page"),
-      col("product"))
-      .cache()
-
-    DF.createOrReplaceTempView("DF")
+    inputDF.registerTempTable("activity")
     val visitorsByProduct = sqlContext.sql(
-      """
-        |SELECT product, timestamp_hour, COUNT(DISTINCT visitor) AS unique_visitors
-        |FROM DF
-        |GROUP BY product, timestamp_hour
-        |""".stripMargin)
+      """SELECT product, timestamp_hour, COUNT(DISTINCT visitor) as unique_visitors
+        |FROM activity GROUP BY product, timestamp_hour
+      """.stripMargin)
 
-    val activityByProduct = sqlContext.sql(
-      """
-        |SELECT
-        |product,
-        |timestamp_hour,
-        |SUM(CASE WHEN action = 'purchase' THEN 1 ELSE 0 END) AS purchase_count,
-        |SUM(CASE WHEN action = 'add_to_cart' THEN 1 ELSE 0 END) AS add_to_cart_count,
-        |SUM(CASE WHEN action = 'page_view' THEN 1 ELSE 0 END) AS page_view_count
-        |FROM DF
-        |GROUP BY product, timestamp_hour
-        |""".stripMargin).cache()
+    visitorsByProduct
+      .write
+      .format("org.apache.spark.sql.cassandra")
+      .options(Map( "keyspace" -> "lambda", "table" -> "batch_visitors_by_product"))
+      .save()
 
-    activityByProduct.show()
-//    activityByProduct.write
-//      .partitionBy("timestamp_hour")
-//      .mode(SaveMode.Append)
-//      .parquet("..../batch1") // TO HDFS "hdfs://lambda-app/batch1" maybe
-//
-//    activityByProduct.createOrReplaceTempView("activityByProduct")
+    val activityByProduct = sqlContext.sql("""SELECT
+                                            product,
+                                            timestamp_hour,
+                                            sum(case when action = 'purchase' then 1 else 0 end) as purchase_count,
+                                            sum(case when action = 'add_to_cart' then 1 else 0 end) as add_to_cart_count,
+                                            sum(case when action = 'page_view' then 1 else 0 end) as page_view_count
+                                            from activity
+                                            group by product, timestamp_hour """).cache()
 
-//    val underExposedProducts = sqlContext.sql(
-//      """
-//        |SELECT
-//        |product,
-//        |timestamp_hour,
-//        |UnderExposed(page_view_count, purchase_count) AS negative_exposure
-//        |FROM activityByProduct
-//        |ORDER BY negative_exposure DESC
-//        |LIMIT 5
-//        |""".stripMargin)
-
-    
-
-
-
-
-
-
+    activityByProduct
+      .write
+      .format("org.apache.spark.sql.cassandra")
+      .options(Map( "keyspace" -> "lambda", "table" -> "batch_activity_by_product"))
+      .save()
   }
-
 }
