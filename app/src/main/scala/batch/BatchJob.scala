@@ -5,9 +5,6 @@ import org.apache.spark.sql.SaveMode
 import domain._
 import utils.SparkUtils._
 
-/**
- * Created by Ahmad Alkilani on 5/1/2016.
- */
 object BatchJob {
   def main (args: Array[String]): Unit = {
 
